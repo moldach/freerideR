@@ -1,0 +1,569 @@
+---
+title: "Free Ride World Tour"
+author: by [Matthew J. Oldach](https://github.com/moldach/) - `r format(Sys.time(), '%d %B %Y')`
+output:
+  html_document:
+    code_folding: hide
+    includes:
+      after_body: footer.html
+      before_body: header.html
+    number_sections: no
+  pdf_document: default
+---
+```{r echo=FALSE}
+# Just to add space between the introduction of the document
+knitr::asis_output(htmltools::htmlPreserve("<br><br>"))
+```
+
+> The [**Freeride World Tour** (FWT)](https://www.freerideworldtour.com/) 
+> has been hosting extreme skiing & snowboarding events since 1996. Having just wrapped up the 2018 season in March I did an analysis on rankings and past FWT winners using R.
+
+```{r echo=FALSE}
+# Just to add space between the introduction of the document
+knitr::asis_output(htmltools::htmlPreserve("<br><br>"))
+```
+
+If you haven't heard of the FWT yet it's an exciting sport where riders choose gnarley-looking lines through cliff-faces, cornices and nasty couloirs ([like this line](https://www.freerideworldtour.com/videos#fwt-media/243479/24082)). There's no artificial jumps or half-pipes just a gate at the top and one at the bottom. The judges use five criteria (Difficulty of Line, Control, Fluidity, Jumps and Technique) which are scored from 0 to 100.
+
+My desire to do this project was mainly to practice some web-scraping, accessing the Twitter API and reinforce my own understanding of the concepts applied within. Skiing and snowboarding are forgotten when it comes to sports analytics - I mean even [tennis has an R package](https://github.com/skoval/deuce)- so I thought it would be cool project. 
+***
+Let's prepare the R session.
+
+```{r}
+# Not sure why my system is messing up from this
+options(java.home="C:\\Program Files\\Java\\jre1.8.0_171\\")
+library(rJava)
+## I like to install/load all of the required packages at once with needs
+if (!require("needs")) {
+  install.packages("needs", dependencies = TRUE)
+  library(needs)
+}
+needs(rvest,
+      readr,
+      tidyverse,
+      magrittr,
+      robotstxt,
+      qdap,
+      tm,
+      twitteR,
+      dismo,
+      maps,
+      ggplot2,
+      data.table,
+      plyr,
+      rtweet,
+      wordcloud,
+      knitr,
+      RColorBrewer,
+      magick,
+      ggthemr)
+
+# color palette
+rdbu11 <- RColorBrewer::brewer.pal(11, "RdBu")
+```
+
+### #FWT18 on Twitter
+***
+First, I collected data from the Twitter API using the TwitteR package. To do this, I needed to set up a developer account to authenticate the connection from R (a good tutorial on how to do this is [here](https://bit.ly/2HKWkgn)).
+
+```{r, eval = FALSE}
+api_key <- "your api key"
+
+api_secret <- "your api secret"
+
+access_token <- "your access token"
+
+access_token_secret <- "your access token secret"
+
+setup_twitter_oauth(api_key, api_secret, access_token, access_token_secret)
+```
+
+```{r, echo = FALSE}
+api_key <- "Co3c8qvQMbmLLjeKxUsKoK7Lm"
+
+api_secret <- "VhM79WZ0duYnBNO3AWgw5YMWbCc9y98ZEmfhsh3VpFL7vbUjng"
+
+access_token <- "253246806-pGd6qONqBCFl8MjvjmIgwZQlanQANJi9H4UCbTlD"
+
+access_token_secret <- "fVx9rP3NeHs2fd9P6Lb7sFePfZ8RoMFefk3Rurs2CQ3h7"
+
+setup_twitter_oauth(api_key, api_secret, access_token, access_token_secret)
+```
+
+### Quickly visualize the frequency of tweets mentioning #FWT18 with `ts_plot()`
+```{r, message=FALSE}
+# For some reason `searchTwitter` only returns 9 days?
+searchTerm <- "#FWT18"
+searchResults <- searchTwitter(searchTerm, n = 10000, since = "2018-04-23")  # Gather Tweets 
+tweetFrame <- twListToDF(searchResults) # Convert to a nice dF
+
+ts_plot(tweetFrame) +
+  ggplot2::theme_minimal() +
+  ggplot2::theme(plot.title = ggplot2::element_text(face = "bold")) +
+  ggplot2::labs(
+    x = NULL, y = NULL,
+    title = "Frequency of #FWT18 Twitter statuses in the past nine days",
+    subtitle = "Twitter status (tweet) counts ",
+    caption = "\nSource: Data collected from Twitter's API via TwitteR"
+  )
+```
+
+I get a warning that I asked the Twitter API for a maximum of 1,000 tweets but it only returned 58 from the past 9 days.
+
+It would be nice to get a longer history but the twitter API only indexs a few days worth of tweets and does not allow historic queries (there's a [Python package that can](https://github.com/Jefferson-Henrique/GetOldTweets-python) but I haven't tried it out yet.
+
+### Where in the world are people discussing #FWT18?
+***
+```{r, message=FALSE, warning=FALSE, error=FALSE, echo=FALSE}
+searchTerm <- "#FWT18"
+searchResults <- searchTwitter(searchTerm, n = 1000)  # Gather Tweets 
+tweetFrame <- twListToDF(searchResults) # Convert to a nice dF
+
+# Get Geo-information
+userInfo <- lookupUsers(tweetFrame$screenName) 
+userFrame <- twListToDF(userInfo) # Convert to a nice dF
+
+locations <- geocode(userFrame$location[!userFrame$location %in% ""])
+
+# approximate lat/lon from textual location data.
+# with(locations, plot(longitude, latitude))
+
+worldMap <- map_data("world")  # Easiest way to grab a world map shapefile
+
+zp1 <- ggplot(worldMap)
+zp1 <- zp1 + geom_path(aes(x = long, y = lat, group = group),  # Draw map
+                       colour = gray(2/3), lwd = 1/3)
+zp1 <- zp1 + geom_point(data = locations,  # Add points indicating users
+                        aes(x = longitude, y = latitude),
+                        colour = "RED", alpha = 1/2, size = 1)
+zp1 <- zp1 + coord_equal() +
+labs(title = "Geo-tagged location of #FWT18 Twitter statuses from the past 9 days", caption = "\nSource: Data collected from Twitter's API via TwitteR")
+  zp1 <- zp1 + theme_minimal()  # Drop background annotations
+print(zp1)
+```
+
+It looks like most of the tweets originated from Europe and North America, although we see a few tweets from Japan, Australia and Africa. 
+
+*Note that geo-tagged tweets are only available for those who have opted in for that in the settings, which is a mere 3% of Twitter users.*
+
+### What are some of the top words coming up in tweets about #FWT18?
+***
+This time I included @FreerideWTour and the Twitter handles of a few of the riders
+by using a function that looks for mentions and hash-tags (`@` and `#`)
+
+```{r, message=FALSE, warning=FALSE}
+searchTerms <- list("FreerideWTour", "FWT18", "EvaWalkner", "HazelBirnbaum", "Jackiepaaso", "LorraineHuber", "drewtabke", "BimboesMickael", "leoslemett", "markus1eder", "Reine_Barkered") 
+
+# function to get tweets in data.frame format for use in ldply
+getTweets <- function(searchTerm, n = 1000) {
+  library(twitteR)
+  
+  TS <- paste0("@", searchTerm, " OR ", "#", searchTerm)
+  # get tweets
+  tweets <- searchTwitter(TS, n = n, since = format(Sys.Date()-7), lang="en")
+  # strip retweets
+  if(length(tweets)>0) {
+    tweets <- strip_retweets(tweets, strip_manual = TRUE, strip_mt = TRUE)
+    # convert to data.frame
+    tweetdf <- twListToDF(tweets)
+    # add searchTerm and return
+    out <- cbind(searchTerm, tweetdf)
+  } else {
+    out <- structure(list(searchTerm = structure(integer(0), .Label = c(searchTerm), class = "factor"),
+                               text = character(0), 
+                               favorited = logical(0), 
+                               favoriteCount = numeric(0), 
+                               replyToSN = character(0), 
+                               created = structure(numeric(0), class = c("POSIXct", "POSIXt"), tzone = "UTC"),
+                               truncated = logical(0), replyToSID = character(0), 
+                               id = character(0), 
+                               replyToUID = character(0), 
+                               statusSource = character(0), 
+                               screenName = character(0), 
+                               retweetCount = numeric(0), 
+                               isRetweet = logical(0), 
+                               retweeted = logical(0), 
+                               longitude = character(0), 
+                               latitude = character(0)), 
+                          .Names = c("searchTerm", "text", "favorited", "favoriteCount", "replyToSN", "created",  "truncated", "replyToSID", "id", "replyToUID", "statusSource", "screenName", "retweetCount", "isRetweet", "retweeted", "longitude","latitude"), row.names = integer(0), class = "data.frame")
+  }
+  
+  return(out)
+}
+```
+
+After having defined a function for multiple search terms, I apply it to the list.
+
+```{r, message=FALSE, warning=FALSE}
+# use plyr to get tweets for all searchTerms in parallel
+tweets_by_searchTerm <- ldply(searchTerms, function(searchTerm) getTweets(searchTerm, n=1000))
+```
+
+These tweets are messy so I clean them first with the `tm_map()`. Then create a wordcloud for the most popular things being mentioned along the #fwt18 tag.
+
+```{r, message=FALSE, warning=FALSE}
+# save the text
+text <- tweets_by_searchTerm$text
+text <- str_replace_all(text, "[^[:graph:]]", " ")
+
+# create corpus
+tweet_corpus <- VCorpus(VectorSource(text))
+
+# clean up the corpus
+
+tweet_corpus <- tm_map(tweet_corpus, content_transformer(replace_abbreviation))
+tweet_corpus <- tm_map(tweet_corpus, content_transformer(tolower))
+tweet_corpus <- tm_map(tweet_corpus, removePunctuation)
+tweet_corpus <- tm_map(tweet_corpus, removeWords, c(stopwords("en"), "freeridewtour", "dropin", "fwt18", "gopro", "httpstcot13hya19ie", "httpstcot2olcfil2g", "markus1eder", "jackiepaaso"))
+
+myDTM <- TermDocumentMatrix(tweet_corpus,
+                              control = list(minWordLength = 1))
+  
+  m <- as.matrix(myDTM)
+  m <- sort(rowSums(m), decreasing=TRUE)
+  
+  wordcloud(names(m), m, scale = c(3, 0.5), 
+          min.freq = 2, max.words = 50,
+          colors=brewer.pal(8, "RdYlBu"))
+```
+
+Looks like `crashes` and the `weekend` are used often in the context of these search terms.
+
+## Exploring FWT18 rankings
+***
+Since the data is not available as a `.txt` or a `.csv` file on the website, nor do they provide and API I needed to crawl for it. 
+It's worth mentioning that administrators may want to protect certain parts of their website for a [number of reasons](http://www.robotstxt.org/norobots-rfc.txt), "such as indexing of an unannounced site, traversal of parts of the site which require vast resources of the server, recursive traversal of an infinite URL space, etc."
+
+Therefore, one should always check if they have permission. One way to do this, is to use the [`robotstxt` package](https://cran.r-project.org/web/packages/robotstxt/vignettes/using_robotstxt.html) to check if your webbot has permission to access certain parts of a webpage (Thanks to [@ma-salmon](https://twitter.com/ma_salmon) for that tip).
+
+```{r, message=FALSE, warning=FALSE}
+# check permission to crawl
+paths_allowed("https://www.freerideworldtour.com/rider/")
+```
+
+Okay, it looks like we have permission.
+
+Unfortunately the code for the [FWT 2018 rankings page](https://www.freerideworldtour.com/rankings-detailed?season=165&competition=2&discipline=38) is "fancy" meaning one needs to click the drop-down arrows to get a riders score for each event. 
+
+I think the data is being loaded with JavaScript which means that I would need to use a program which can programmatically click the button. I've heard `splashr` or `RSelenium` may accomplish this. But, I'm new to web-scraping and only familiar with `rvest` so I came up with a *(relatively)* quick work-around.
+
+I placed the names from the 2018 roster into a [dataset](https://www.freerideworldtour.com/riders)) and loaded it as an object. I can automatically crawl every rider by feeding these names to `rvest` with a `for` loop to the end of https://www.freerideworldtour.com/rider/
+
+```{r , message=FALSE, warning=FALSE, error=TRUE}
+roster <- read_csv("https://ndownloader.figshare.com/files/11173433")
+
+# create a url prefix
+url_base <- "https://www.freerideworldtour.com/rider/"
+riders <- roster$name
+
+# Assemble the dataset
+output <- data_frame()
+for (i in riders) { 
+  temp <- read_html(paste0(url_base, i)) %>% 
+    html_node("div") %>% 
+    html_text() %>% 
+    gsub("\\s*\\n+\\s*", ";", .) %>% 
+    gsub("pts.", "\n", .) %>% 
+    read.table(text = ., fill = T, sep = ";", row.names = NULL, 
+               col.names = c("Drop", "Ranking", "FWT", "Events", "Points")) %>%
+    subset(select = 2:5) %>% 
+    dplyr::filter(
+      !is.na(as.numeric(as.character(Ranking))) & 
+        as.character(Points) != ""
+    ) %>%
+    dplyr::mutate(name = i)
+  output <- bind_rows(output, temp)
+}
+```
+
+I was going to look at the overall standings for each category (skiing and snowboarding) broken-down by how many points athletes earned at each FWT event in 2018; however, I noticed there was something odd going on.
+
+How many riders did I search for?
+
+```{r}
+# How many riders in the roster?
+unique(roster) # there are 56
+```
+
+How many riders did I actually get information for?
+
+```{r}
+# How many names in the output object?
+unique(output$name) # there are only 37?
+```
+
+Apparently the function I wrote is not doing exactly what I want it to. After a bit of messing around I found that the rider `elias-elhardt` was the source of the trouble.
+
+Since Elias only competed in the qualifiers let's remove him from the `roster` object and re-run the code
+
+```{r, message=FALSE, warning=FALSE, error=TRUE}
+roster <- read_csv("https://ndownloader.figshare.com/files/11173433")
+
+# Remove Elias Elhardt
+roster <- roster[-40,]
+riders <- roster$name
+
+# Assemble the dataset
+output <- data_frame()
+for (i in riders) { 
+  temp <- read_html(paste0(url_base, i)) %>% 
+    html_node("div") %>% 
+    html_text() %>% 
+    gsub("\\s*\\n+\\s*", ";", .) %>% 
+    gsub("pts.", "\n", .) %>% 
+    read.table(text = ., fill = T, sep = ";", row.names = NULL, 
+               col.names = c("Drop", "Ranking", "FWT", "Events", "Points")) %>%
+    subset(select = 2:5) %>% 
+    dplyr::filter(
+      !is.na(as.numeric(as.character(Ranking))) & 
+        as.character(Points) != ""
+    ) %>%
+    dplyr::mutate(name = i)
+  output <- bind_rows(output, temp)
+}
+
+# Join with roster
+fwt_2018 <- output %>% 
+  left_join(roster)
+fwt_2018 <- unique(fwt_2018)
+fwt_2018$Points <- as.numeric(fwt_2018$Points)
+
+# Set theme for the next few graphics
+ggthemr("fresh")
+
+# Female ski
+fwt_2018 %>% 
+  filter(FWT == "FWT") %>% 
+  filter(sex == "female") %>% 
+  filter(Points != "NA") %>% 
+  filter(sport == "ski") %>%
+  ggplot(aes(x = name, y = Points, fill = Events)) +
+  geom_col() +
+  coord_flip() +
+  labs(title = "Female Ski")
+
+# Female snowboard
+fwt_2018 %>% 
+  filter(FWT == "FWT") %>% 
+  filter(sex == "female") %>% 
+  filter(Points != "NA") %>% 
+  filter(sport == "snowboard") %>%
+  ggplot(aes(x = name, y = Points, fill = Events)) +
+  geom_col() +
+  coord_flip() +
+   labs(title = "Female Snowboard")
+
+# Male ski
+fwt_2018 %>% 
+  filter(FWT == "FWT") %>% 
+  filter(sex == "male") %>% 
+  filter(Points != "NA") %>% 
+  filter(sport == "ski") %>%
+  ggplot(aes(x = name, y = Points, fill = Events)) +
+  geom_col() +
+  coord_flip() +
+  labs(title = "Male Ski")
+
+# Male snowboard
+fwt_2018 %>% 
+  filter(FWT == "FWT") %>% 
+  filter(sex == "male") %>% 
+  filter(Points != "NA") %>% 
+  filter(sport == "snowboard") %>%
+  filter(name != "drew-tabke") %>% 
+  ggplot(aes(x = name, y = Points, fill = Events)) +
+  geom_col() +
+  coord_flip() +
+   labs(title = "Male Snowboard")
+```
+
+## Historical FWT Winners
+***
+The FWT lists past event winners on their [website](https://www.freerideworldtour.com/results). I gathered the data of all winners from the 23 tours between 1996 and 2018 and included their age from either the website or a quick web-search. The dataset can be found on figshare.
+
+```{r, message=FALSE, warning=FALSE}
+# load the data
+df <- read_csv("https://ndownloader.figshare.com/files/11300864")
+```
+
+### Get summary statistics on age of winners
+```{r}
+df %>% 
+  summarize(mean_age = median(age, na.rm = TRUE),
+            max_age = max(age, na.rm = TRUE),
+            min_age = min(age, na.rm = TRUE))
+```
+
+### Find minimum age of winner by sex and sport
+```{r}
+df %>%
+  group_by(sex, sport) %>% 
+  slice(which.min(age)) %>% 
+  dplyr::select(name, sex, sport, age)
+```
+
+### How many times have riders won FWT events?
+```{r, message=FALSE, warning=FALSE}
+df %>% 
+  dplyr::select(year:age) %>% 
+  add_count(name) %>% 
+  dplyr::select(-year, -month, -age) %>% 
+  unique() %>% 
+  arrange(desc(n)) %>%
+  add_count(n) %>% 
+  # filter(n != 1) %>% 
+  ggplot(aes(x = n, y = nn, fill = "blue")) + 
+  geom_col(show.legend = FALSE) +
+  labs(x = "Number of times rider won FWT events", y = "Number of riders who won FWT events") +
+  scale_x_continuous(breaks = seq(1, 16, 1), labels = seq(1, 16, 1))
+```
+
+The large number of riders who won at least one FWT event dwarfs those unique athlets who won a considerable number of events. Let's have a look at those who won at least 5 events. 
+
+```{r, message=FALSE, warning=FALSE}
+df %>% 
+  dplyr::select(year:age) %>% 
+  add_count(name) %>% 
+  dplyr::select(-year, -month, -age) %>% 
+  unique() %>% 
+  arrange(desc(n)) %>%
+  add_count(n) %>% 
+  filter(n != 1) %>% 
+  ggplot(aes(x = n, y = nn, fill = "blue")) + 
+  geom_col(show.legend = FALSE) +
+  labs(x = "# riders", y = "Time's crowned winner") +
+  scale_x_continuous(breaks = seq(2, 16, 1), labels = seq(2, 16, 1)) +
+  theme(panel.grid = element_line(colour = "grey75", size = .25)) + labs(caption = "Histogram of the participants by the number of times they won FWT events")
+```  
+
+### Who are some of the FWT legends?
+```{r, message=FALSE, warning=FALSE}
+# the leaders of participation in world championships
+kable_dt <- df %>% 
+  dplyr::select(year:age) %>% 
+  add_count(name) %>% 
+  dplyr::select(-year, -month, -age) %>% 
+  unique() %>% 
+  arrange(desc(n)) %>%
+  top_n(15)
+
+kable(kable_dt)
+```
+
+Xavier De Le Rue is near the top with 8 and appears under both the ski and snowboarder categories? That's strange.
+
+Let's check if there are any other athletes who excel at both skiing and snowboarding, or more likely, are miscategorized as a skiier and a snowboarder?
+
+```{r}
+df %>% 
+  dplyr::select(name,sport) %>% 
+  unique() %>%
+  add_count(name) %>%
+  arrange(desc(n))
+```
+
+We can replace that mistake in the dataset like this
+
+```{r}
+df$sport[df$name == "Xavier De Le Rue"] <- "snowboard"
+```
+
+### Which countries have won the most?
+```{r, message=FALSE, warning=FALSE}
+df  %>%
+  dplyr::select(year, athlete_country) %>%
+  mutate(athlete_country = factor(paste(athlete_country))) %>%
+  mutate(athlete_country = factor(athlete_country, levels = rev(levels(athlete_country))), year = factor(year))  %>% 
+  add_count(athlete_country) %>% 
+  ggplot(aes(x = year, y = athlete_country)) +
+  geom_point(color = rdbu11[11], size = 7) +
+  geom_text(aes(y = athlete_country, x = 17.5, label = n, color = n), size = 7, fontface = 2) +
+  geom_text(aes(y = athlete_country, x = 18.5, label = " "), size = 7) +
+  xlab(NULL) +
+  ylab(NULL) +
+  theme_bw(base_size = 25, base_family = "mono") +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+```
+
+### How old are the winners from each country?
+
+First we can look at how the age of winners from each country compares to the other countries
+
+```{r}
+df %>% 
+  ggplot(aes(x = athlete_country, y = age)) +
+  geom_boxplot(fill = "White", colour = "#3366FF", alpha = 0.75, outlier.color = "red") +
+  xlab("Country") +
+  ylab("Age of Winners")
+```
+
+A better way to get a visual overview of distributions is with a rain cloud plot. Since a few of the countries only had one competitor let's remove them.
+
+```{r, warning = FALSE}
+source("https://gist.githubusercontent.com/benmarwick/2a1bb0133ff568cbe28d/raw/fb53bd97121f7f9ce947837ef1a4c65a73bffb3f/geom_flat_violin.R")
+
+df %>%
+  filter(!(athlete_country %in% c("Russia", "Japan", "Great Britain"))) %>% 
+  ggplot(aes(x = athlete_country, y = age, fill = athlete_country)) +
+  geom_flat_violin(position = position_nudge(x = .3, y = 0), alpha = .8) +
+  geom_point(aes(y = age, color = athlete_country), position = position_jitter(width = .15), size = .75, alpha = 0.8) +
+  geom_boxplot(width = .1, guides = FALSE, outlier.shape = NA, alpha = 0.5) + expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) +
+  scale_color_brewer(palette = "Spectral") +
+  scale_fill_brewer(palette = "Spectral") +
+  labs(x = "Country", y = "Age") +
+  ggsave(filename = "age.png", width = 5, height = 4, dpi = 300)
+```
+
+For no other reason than I was interested in trying out the `magick` package, let's overlay the figure with a GIF of Bender snowboarding.
+
+```{r}
+# Now call back the plot
+background <- image_read("age.png")
+# And bring in a logo
+logo_raw <- image_read("http://37.media.tumblr.com/3ca923d625f29fa1ce89a50af5ad1bdc/tumblr_misjczt7kG1rdutw3o1_400.gif")
+
+frames <- lapply(logo_raw, function(frame) {
+  image_composite(background, frame, offset = "+70+800")
+})
+
+animation <- image_animate(image_join(frames))
+```
+
+```{r}
+# WARNING: this can take some time
+image_write(animation, "~/bender.gif")
+```
+
+![](bender.gif)
+
+It may also be interesting to ask how has the age of winners changed in the history of the competition.
+
+### Are FWT winners getting younger with time?
+
+```{r, warning=FALSE}
+ggthemr_reset()
+
+solo <- c("Russia", "Great Britain", "Japan")
+
+df %>% 
+  filter(!(athlete_country %in% solo)) %>% # filter out countries with just one competitor
+  ggplot(aes(x = year, y = age)) +
+  geom_point(color = "grey50", alpha = 0.75) +
+  stat_summary(aes(group = athlete_country), geom = "line", fun.y = mean, size = .5, color = "grey50") +
+  stat_smooth(aes(group = athlete_country, color = athlete_country), geom = "line", size = 1) +
+  facet_wrap(~athlete_country, ncol=5) +
+  scale_x_discrete(labels = paste(seq(1996, 2018, 1)), breaks = paste(seq(1996, 2018, 1))) +
+  labs(x="Country", y="Age of Winners") +
+  theme(legend.position = "none", panel.grid = element_line(colour = "grey75", size = .25))
+```
+
+There doesn't appear to be any trend with age and winning FWT events over time.
+
+## Notes
+***
+This report was produced using RStudio
+```{r}
+sessionInfo()
+```
